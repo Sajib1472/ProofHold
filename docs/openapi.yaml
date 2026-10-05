@@ -1,0 +1,1288 @@
+openapi: 3.0.3
+info:
+  title: ProofHold API
+  version: 1.0.0
+  description: |
+    Lost-and-found desk where owners prove an item is theirs without seeing the photo.
+
+    **Product rule:** Public search must not leak enough to fake a claim.
+
+    **Redaction (enforce with separate DTOs, not by omitting fields on a shared entity):**
+
+    | Field | Public list/detail | Staff | Winning claimer after verify |
+    |---|---|---|---|
+    | category, location, found date | yes | yes | yes |
+    | pendingClaimCount | yes | yes | yes |
+    | photo | no | yes | yes |
+    | serial / unique marks | no | yes | yes |
+    | full description | no | yes | yes |
+    | challenge questions | no | yes | only while submitting a claim (`GET /v1/items/{id}/challenges`) |
+    | challenge answers | never | staff only | never |
+
+    Pagination is offset-based: `page` (0-indexed), `size`. List sort is `foundAt` descending, then `id` descending.
+    Item mutations that change status require `If-Match` with the current `ETag` (the item `version`).
+    `POST /v1/items/{id}/claims` and `POST /v1/items/{id}/handoffs` require `Idempotency-Key`.
+  contact:
+    name: ProofHold
+servers:
+  - url: http://localhost:8080
+    description: Local v1
+
+tags:
+  - name: Auth
+  - name: Locations
+  - name: Items
+  - name: Claims
+  - name: Handoffs
+  - name: Audit
+
+security:
+  - bearerAuth: []
+
+paths:
+  /v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Exchange email and password for a JWT
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a CLAIMER account
+      description: v1 self-registration always creates role CLAIMER. Staff accounts are seeded, never registered here.
+      security: []
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Registered and authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user
+      operationId: me
+      responses:
+        "200":
+          description: The authenticated principal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/locations:
+    get:
+      tags: [Locations]
+      summary: List desks
+      description: Public. v1 has a single location (Library Front Desk).
+      security: []
+      operationId: listLocations
+      responses:
+        "200":
+          description: All locations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /v1/locations/{locationId}:
+    get:
+      tags: [Locations]
+      summary: Get one desk
+      security: []
+      operationId: getLocation
+      parameters:
+        - $ref: "#/components/parameters/LocationId"
+      responses:
+        "200":
+          description: Location
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Location"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/items:
+    get:
+      tags: [Items]
+      summary: Search items
+      description: |
+        Public collection. Always returns `PublicItem` (redacted). Staff who need secrets must `GET /v1/items/{id}` with a STAFF token.
+        `q` matches category and coarse location name only — never serial, full description, or challenge text.
+        Default and only sort: `foundAt` desc, `id` desc.
+      security: []
+      operationId: listItems
+      parameters:
+        - name: locationId
+          in: query
+          schema:
+            type: integer
+            format: int64
+        - name: category
+          in: query
+          schema:
+            $ref: "#/components/schemas/ItemCategory"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ItemStatus"
+        - name: q
+          in: query
+          description: Coarse text match on category and location name only
+          schema:
+            type: string
+            maxLength: 80
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Redacted page of items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicItemPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+    post:
+      tags: [Items]
+      summary: Staff logs a found item
+      description: |
+        STAFF only. Creates item as HELD in the same transaction (LOGGED is internal and not returned).
+        Requires at least two challenges. `holdUntil` must be in the future in the location timezone.
+        Response is `StaffItem` (full, except challenge answers are never echoed in create response — answers are write-only).
+      operationId: createItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateItemRequest"
+      responses:
+        "201":
+          description: Item held at the desk
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Location:
+              description: Canonical item URL
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/items/{itemId}:
+    get:
+      tags: [Items]
+      summary: Get one item
+      description: |
+        Payload class depends on the caller:
+        - anonymous or CLAIMER who has not won → `PublicItem` (redacted)
+        - STAFF → `StaffItem` (full; challenge answers included)
+        - winning CLAIMER after VERIFIED → `VerifiedClaimerItem` (photo, serial, unique marks, full description; no challenge answers)
+        Public/unauthenticated access is allowed and still redacted.
+        `ETag` is always the item `version`.
+      security: []
+      operationId: getItem
+      parameters:
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Item. Schema varies by caller (see description).
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PublicItem"
+                  - $ref: "#/components/schemas/StaffItem"
+                  - $ref: "#/components/schemas/VerifiedClaimerItem"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/items/{itemId}/challenges:
+    get:
+      tags: [Items]
+      summary: Challenge prompts for submitting a claim
+      description: |
+        Authenticated CLAIMER only. Returns prompts and ids, never answers.
+        Allowed only while the item can still receive a claim (HELD or CLAIM_PENDING).
+        Staff already receive prompts (and answers) on `StaffItem`.
+      operationId: listItemChallenges
+      parameters:
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Prompts only
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChallengePrompt"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /v1/items/{itemId}/claims:
+    post:
+      tags: [Claims]
+      summary: Submit a claim
+      description: |
+        CLAIMER only. Does not auto-verify. Item becomes CLAIM_PENDING if it was HELD.
+        Same `Idempotency-Key` + same body returns the original claim (200) instead of creating a row.
+        Same key + different body → 409 idempotency conflict.
+        Claiming VERIFIED, READY_FOR_PICKUP, RETURNED, EXPIRED, or DONATED → 409 `item-already-verified` or `illegal-transition`.
+      operationId: createClaim
+      parameters:
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateClaimRequest"
+      responses:
+        "200":
+          description: Replay of an idempotent claim
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+        "201":
+          description: Claim accepted for staff review
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/items/{itemId}/handoffs:
+    post:
+      tags: [Handoffs]
+      summary: Book a pickup window
+      description: |
+        Winning CLAIMER or STAFF. Item must be VERIFIED.
+        Slot must be in the future and inside the location `openFrom`–`openTo` in the location timezone.
+        Requires `Idempotency-Key`. Requires `If-Match` of the current item ETag.
+        Success moves item to READY_FOR_PICKUP and increments version.
+      operationId: createHandoff
+      parameters:
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHandoffRequest"
+      responses:
+        "200":
+          description: Replay of an idempotent handoff
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Handoff"
+        "201":
+          description: Pickup booked
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Location:
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Handoff"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/items/{itemId}/donate:
+    post:
+      tags: [Items]
+      summary: Mark an expired item donated
+      description: STAFF only. Item must be EXPIRED. Requires `If-Match`. Moves item to DONATED.
+      operationId: donateItem
+      parameters:
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Donated
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+
+  /v1/items/{itemId}/audit:
+    get:
+      tags: [Audit]
+      summary: Append-only audit timeline
+      description: STAFF only. Oldest event first.
+      operationId: listItemAudit
+      parameters:
+        - $ref: "#/components/parameters/ItemId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Audit page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/claims/{claimId}:
+    get:
+      tags: [Claims]
+      summary: Get one claim
+      description: STAFF, or the claimer who owns the claim. Never includes challenge answers. Staff see `answerScore` only.
+      operationId: getClaim
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+      responses:
+        "200":
+          description: Claim
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Claim"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/claims/{claimId}/decision:
+    post:
+      tags: [Claims]
+      summary: Approve or reject a pending claim
+      description: |
+        STAFF only. Body is a decision resource, not `/approve`.
+        Requires `If-Match` equal to the **item** ETag (not the claim id).
+        APPROVE → this claim VERIFIED, item VERIFIED, every other pending claim REJECTED with reason `another claim was verified`.
+        REJECT → this claim REJECTED; item returns to HELD if no pending claims remain.
+        Stale `If-Match` (two staff deciding at once) → 412.
+      operationId: decideClaim
+      parameters:
+        - $ref: "#/components/parameters/ClaimId"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimDecisionRequest"
+      responses:
+        "200":
+          description: Decision applied
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimDecisionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /v1/me/claims:
+    get:
+      tags: [Claims]
+      summary: Claims filed by the current claimer
+      operationId: listMyClaims
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+      responses:
+        "200":
+          description: Page of the caller's claims
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClaimPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/handoffs/{handoffId}:
+    get:
+      tags: [Handoffs]
+      summary: Get one pickup booking
+      description: STAFF, or the winning claimer on that item.
+      operationId: getHandoff
+      parameters:
+        - $ref: "#/components/parameters/HandoffId"
+      responses:
+        "200":
+          description: Handoff
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Handoff"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/handoffs/{handoffId}/complete:
+    post:
+      tags: [Handoffs]
+      summary: Mark pickup complete
+      description: |
+        STAFF only. Item must be READY_FOR_PICKUP. Requires `If-Match` of the item ETag.
+        Success moves item to RETURNED. RETURNED cannot transition back to HELD.
+      operationId: completeHandoff
+      parameters:
+        - $ref: "#/components/parameters/HandoffId"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Item returned
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Handoff"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    LocationId:
+      name: locationId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    ClaimId:
+      name: claimId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    HandoffId:
+      name: handoffId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    Page:
+      name: page
+      in: query
+      description: 0-indexed page number
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Size:
+      name: size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: Must equal the current item ETag (`version` as a quoted decimal, e.g. `"3"`).
+      schema:
+        type: string
+
+  headers:
+    ETag:
+      description: Item version for optimistic locking. Send back as If-Match.
+      schema:
+        type: string
+        example: '"1"'
+
+  responses:
+    BadRequest:
+      description: Malformed JSON or unreadable request
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: https://proofhold.local/problems/bad-request
+            title: Bad request
+            status: 400
+            detail: Request body is not valid JSON.
+            instance: /v1/items
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: https://proofhold.local/problems/unauthorized
+            title: Unauthorized
+            status: 401
+            detail: Authentication is required.
+            instance: /v1/items
+    Forbidden:
+      description: Authenticated but the role cannot perform this action
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: https://proofhold.local/problems/forbidden
+            title: Forbidden
+            status: 403
+            detail: CLAIMER cannot decide claims.
+            instance: /v1/claims/4/decision
+    NotFound:
+      description: Resource does not exist
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: https://proofhold.local/problems/not-found
+            title: Not found
+            status: 404
+            detail: Item 18 does not exist.
+            instance: /v1/items/18
+    Conflict:
+      description: |
+        Illegal state or duplicate. `type` is one of:
+        `item-already-verified`, `illegal-transition`, `idempotency-conflict`.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          examples:
+            itemAlreadyVerified:
+              value:
+                type: https://proofhold.local/problems/item-already-verified
+                title: Item already verified
+                status: 409
+                detail: Item 18 already has a verified claim.
+                instance: /v1/items/18/claims
+            illegalTransition:
+              value:
+                type: https://proofhold.local/problems/illegal-transition
+                title: Illegal transition
+                status: 409
+                detail: RETURNED cannot transition to HELD.
+                instance: /v1/handoffs/9/complete
+    PreconditionFailed:
+      description: If-Match did not equal the current item version
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: https://proofhold.local/problems/precondition-failed
+            title: Precondition failed
+            status: 412
+            detail: Item version does not match If-Match.
+            instance: /v1/claims/4/decision
+    UnprocessableEntity:
+      description: Field-level validation failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ValidationProblem"
+          examples:
+            slotOutsideHours:
+              value:
+                type: https://proofhold.local/problems/slot-outside-hours
+                title: Pickup is outside desk hours
+                status: 422
+                detail: Location Library Front Desk is open 09:00–17:00 America/New_York.
+                instance: /v1/items/18/handoffs
+                errors:
+                  - field: slotStart
+                    code: outside_hours
+                    message: Slot start is after openTo.
+            itemValidation:
+              value:
+                type: https://proofhold.local/problems/validation
+                title: Validation failed
+                status: 422
+                detail: Item could not be logged.
+                instance: /v1/items
+                errors:
+                  - field: challenges
+                    code: too_short
+                    message: At least two challenges are required.
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, detail, instance]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://proofhold.local/problems/item-already-verified
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        field:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+
+    ValidationProblem:
+      allOf:
+        - $ref: "#/components/schemas/Problem"
+        - type: object
+          required: [errors]
+          properties:
+            errors:
+              type: array
+              items:
+                $ref: "#/components/schemas/FieldError"
+
+    Role:
+      type: string
+      enum: [STAFF, CLAIMER, FINDER]
+
+    ItemCategory:
+      type: string
+      enum: [WALLET, KEYS, PHONE, BAG, LAPTOP, ID_CARD, JEWELRY, OTHER]
+
+    ItemStatus:
+      type: string
+      description: |
+        Returned items never go back to HELD.
+        Allowed transitions:
+        LOGGED → HELD;
+        HELD → CLAIM_PENDING | EXPIRED;
+        CLAIM_PENDING → VERIFIED | HELD | EXPIRED;
+        VERIFIED → READY_FOR_PICKUP | HELD;
+        READY_FOR_PICKUP → RETURNED | EXPIRED;
+        EXPIRED → DONATED.
+        LOGGED is not exposed on the wire; create returns HELD.
+      enum:
+        - HELD
+        - CLAIM_PENDING
+        - VERIFIED
+        - READY_FOR_PICKUP
+        - RETURNED
+        - EXPIRED
+        - DONATED
+
+    ClaimStatus:
+      type: string
+      enum: [PENDING, VERIFIED, REJECTED]
+
+    ClaimDecision:
+      type: string
+      enum: [APPROVE, REJECT]
+
+    HandoffStatus:
+      type: string
+      enum: [BOOKED, COMPLETED, CANCELLED]
+
+    AuditAction:
+      type: string
+      enum:
+        - ITEM_LOGGED
+        - CLAIM_SUBMITTED
+        - CLAIM_APPROVED
+        - CLAIM_REJECTED
+        - HANDOFF_BOOKED
+        - HANDOFF_COMPLETED
+        - ITEM_EXPIRED
+        - ITEM_DONATED
+
+    User:
+      type: object
+      required: [id, email, role]
+      properties:
+        id:
+          type: integer
+          format: int64
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/Role"
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+
+    LoginResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn, user]
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          enum: [Bearer]
+        expiresIn:
+          type: integer
+          description: Seconds until expiry
+        user:
+          $ref: "#/components/schemas/User"
+
+    Location:
+      type: object
+      required: [id, name, timezone, openFrom, openTo]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+          example: Library Front Desk
+        timezone:
+          type: string
+          example: America/New_York
+        openFrom:
+          type: string
+          format: time
+          example: "09:00:00"
+        openTo:
+          type: string
+          format: time
+          example: "17:00:00"
+
+    PageInfo:
+      type: object
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+
+    PublicItem:
+      type: object
+      description: |
+        Redacted item. Must not include photo, serial, uniqueMarks, fullDescription,
+        challenge prompts, or challenge answers.
+      required:
+        - id
+        - locationId
+        - locationName
+        - category
+        - foundOn
+        - status
+        - pendingClaimCount
+        - version
+      properties:
+        id:
+          type: integer
+          format: int64
+        locationId:
+          type: integer
+          format: int64
+        locationName:
+          type: string
+        category:
+          $ref: "#/components/schemas/ItemCategory"
+        foundOn:
+          type: string
+          format: date
+          description: Calendar date in the location timezone. No clock time.
+        status:
+          $ref: "#/components/schemas/ItemStatus"
+        pendingClaimCount:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 0
+
+    StaffChallenge:
+      type: object
+      required: [id, prompt, expectedAnswer]
+      properties:
+        id:
+          type: integer
+          format: int64
+        prompt:
+          type: string
+        expectedAnswer:
+          type: string
+          description: Staff-only. Never returned on public or claimer payloads.
+
+    StaffItem:
+      allOf:
+        - $ref: "#/components/schemas/PublicItem"
+        - type: object
+          required:
+            - holdUntil
+            - whereFound
+            - fullDescription
+            - challenges
+          properties:
+            holdUntil:
+              type: string
+              format: date-time
+            whereFound:
+              type: string
+            photoUrl:
+              type: string
+              format: uri
+              nullable: true
+            serial:
+              type: string
+              nullable: true
+            uniqueMarks:
+              type: string
+              nullable: true
+            fullDescription:
+              type: string
+            challenges:
+              type: array
+              minItems: 2
+              items:
+                $ref: "#/components/schemas/StaffChallenge"
+
+    VerifiedClaimerItem:
+      allOf:
+        - $ref: "#/components/schemas/PublicItem"
+        - type: object
+          description: Secrets needed to collect the item. No challenge answers.
+          required: [fullDescription]
+          properties:
+            photoUrl:
+              type: string
+              format: uri
+              nullable: true
+            serial:
+              type: string
+              nullable: true
+            uniqueMarks:
+              type: string
+              nullable: true
+            fullDescription:
+              type: string
+
+    PublicItemPage:
+      type: object
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicItem"
+        page:
+          $ref: "#/components/schemas/PageInfo"
+
+    CreateChallengeRequest:
+      type: object
+      required: [prompt, expectedAnswer]
+      properties:
+        prompt:
+          type: string
+          minLength: 4
+          maxLength: 200
+        expectedAnswer:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Write-only. Stored hashed. Never returned on public endpoints.
+
+    CreateItemRequest:
+      type: object
+      required: [locationId, category, foundAt, holdUntil, whereFound, fullDescription, challenges]
+      properties:
+        locationId:
+          type: integer
+          format: int64
+        category:
+          $ref: "#/components/schemas/ItemCategory"
+        foundAt:
+          type: string
+          format: date-time
+        holdUntil:
+          type: string
+          format: date-time
+        whereFound:
+          type: string
+          maxLength: 200
+        photoUrl:
+          type: string
+          format: uri
+        serial:
+          type: string
+          maxLength: 80
+        uniqueMarks:
+          type: string
+          maxLength: 200
+        fullDescription:
+          type: string
+          maxLength: 2000
+        challenges:
+          type: array
+          minItems: 2
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/CreateChallengeRequest"
+
+    ChallengePrompt:
+      type: object
+      description: Claimer-facing prompt. No answer.
+      required: [id, prompt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        prompt:
+          type: string
+
+    ClaimAnswer:
+      type: object
+      required: [challengeId, value]
+      properties:
+        challengeId:
+          type: integer
+          format: int64
+        value:
+          type: string
+          maxLength: 80
+
+    CreateClaimRequest:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: array
+          minItems: 2
+          items:
+            $ref: "#/components/schemas/ClaimAnswer"
+
+    Claim:
+      type: object
+      required: [id, itemId, claimerId, status, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        itemId:
+          type: integer
+          format: int64
+        claimerId:
+          type: integer
+          format: int64
+        status:
+          $ref: "#/components/schemas/ClaimStatus"
+        answerScore:
+          type: integer
+          minimum: 0
+          description: Count of normalized answers that matched. Staff only; omitted for claimers.
+        reason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ClaimPage:
+      type: object
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/Claim"
+        page:
+          $ref: "#/components/schemas/PageInfo"
+
+    ClaimDecisionRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          $ref: "#/components/schemas/ClaimDecision"
+        reason:
+          type: string
+          maxLength: 500
+
+    ClaimDecisionResponse:
+      type: object
+      required: [claim, itemVersion]
+      properties:
+        claim:
+          $ref: "#/components/schemas/Claim"
+        itemVersion:
+          type: integer
+          description: New item version; also sent as ETag.
+
+    CreateHandoffRequest:
+      type: object
+      required: [slotStart, slotEnd]
+      properties:
+        slotStart:
+          type: string
+          format: date-time
+        slotEnd:
+          type: string
+          format: date-time
+
+    Handoff:
+      type: object
+      required: [id, itemId, claimId, slotStart, slotEnd, status]
+      properties:
+        id:
+          type: integer
+          format: int64
+        itemId:
+          type: integer
+          format: int64
+        claimId:
+          type: integer
+          format: int64
+        slotStart:
+          type: string
+          format: date-time
+        slotEnd:
+          type: string
+          format: date-time
+        status:
+          $ref: "#/components/schemas/HandoffStatus"
+
+    AuditEvent:
+      type: object
+      required: [id, itemId, actorId, action, at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        itemId:
+          type: integer
+          format: int64
+        actorId:
+          type: integer
+          format: int64
+        action:
+          $ref: "#/components/schemas/AuditAction"
+        at:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+          description: Non-secret context. Must never contain challenge answers, serials, or photos.
+
+    AuditEventPage:
+      type: object
+      required: [content, page]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        page:
+          $ref: "#/components/schemas/PageInfo"
