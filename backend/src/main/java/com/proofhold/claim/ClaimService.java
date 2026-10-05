@@ -17,7 +17,9 @@ import com.proofhold.item.ItemViews;
 import com.proofhold.user.User;
 import com.proofhold.user.UserRepository;
 import com.proofhold.web.ConflictException;
+import com.proofhold.web.ETags;
 import com.proofhold.web.NotFoundException;
+import com.proofhold.web.PreconditionFailedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -103,6 +105,62 @@ public class ClaimService {
 
         audit.record(item, claimer, AuditAction.CLAIM_SUBMITTED, Map.of("claimId", claim.getId()));
         return new ClaimSubmitResult(ClaimResponse.forClaimer(claim), true);
+    }
+
+    @Transactional
+    public ClaimDecisionResponse decide(
+            AuthPrincipal principal, Long claimId, String ifMatch, ClaimDecisionRequest request) {
+        User staff = users.findById(principal.id()).orElseThrow(UnauthorizedException::new);
+        Claim claim = claims.findById(claimId)
+                .orElseThrow(() -> new NotFoundException("Claim " + claimId + " does not exist."));
+        Item item = claim.getItem();
+        if (item.getStatus() == ItemStatus.RETURNED || item.getStatus() == ItemStatus.DONATED) {
+            throw new ConflictException(
+                    "illegal-transition",
+                    "Illegal transition",
+                    item.getStatus() + " cannot accept a claim decision.");
+        }
+        int expectedVersion = ETags.parse(ifMatch);
+        int currentVersion = item.getVersion() == null ? 0 : item.getVersion();
+        if (expectedVersion != currentVersion) {
+            throw new PreconditionFailedException("Item version does not match If-Match.");
+        }
+        if (claim.getStatus() != ClaimStatus.PENDING) {
+            throw new ConflictException(
+                    "illegal-transition",
+                    "Illegal transition",
+                    "Claim " + claimId + " is not pending.");
+        }
+
+        Instant now = Instant.now();
+        if (request.decision() == ClaimDecision.APPROVE) {
+            item.setStatus(ItemStateMachine.require(item.getStatus(), ItemStatus.VERIFIED));
+            claim.setStatus(ClaimStatus.VERIFIED);
+            claim.setReason(request.reason());
+            claim.setDecidedAt(now);
+            for (Claim other : claims.findByItemIdAndStatus(item.getId(), ClaimStatus.PENDING)) {
+                if (!claim.getId().equals(other.getId())) {
+                    other.setStatus(ClaimStatus.REJECTED);
+                    other.setReason("another claim was verified");
+                    other.setDecidedAt(now);
+                }
+            }
+            audit.record(item, staff, AuditAction.CLAIM_APPROVED, Map.of("claimId", claim.getId()));
+        } else {
+            claim.setStatus(ClaimStatus.REJECTED);
+            claim.setReason(request.reason());
+            claim.setDecidedAt(now);
+            boolean othersPending = claims.findByItemIdAndStatus(item.getId(), ClaimStatus.PENDING).stream()
+                    .anyMatch(other -> !claim.getId().equals(other.getId()));
+            if (!othersPending) {
+                item.setStatus(ItemStateMachine.require(item.getStatus(), ItemStatus.HELD));
+            }
+            audit.record(item, staff, AuditAction.CLAIM_REJECTED, Map.of("claimId", claim.getId()));
+        }
+        items.save(item);
+        claims.save(claim);
+        int version = item.getVersion() == null ? 0 : item.getVersion();
+        return new ClaimDecisionResponse(ClaimResponse.forStaff(claim), version);
     }
 
     private void rejectIfUnclaimable(Item item) {
