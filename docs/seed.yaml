@@ -1,0 +1,21 @@
+# v1 demo seed. One desk. Three users. Do not add a second location.
+product_rule: Public search must not leak enough to fake a claim.
+
+location:
+  id: 1
+  name: Library Front Desk
+  timezone: America/New_York
+  open_from: "09:00"
+  open_to: "17:00"
+
+users:
+  - email: staff@proofhold.local
+    password: proofhold
+    role: STAFF
+  - email: alice@proofhold.local
+    password: proofhold
+    role: CLAIMER
+  - email: bob@proofhold.local
+    password: proofhold
+    role: CLAIMER
+    note: Second claimer for double-approve conflict tests.

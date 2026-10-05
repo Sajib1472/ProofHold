@@ -1,0 +1,29 @@
+.DS_Store
+*.log
+*.swp
+*.iml
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+
+# Java / Maven / Gradle
+target/
+build/
+out/
+.gradle/
+*.class
+*.jar
+*.war
+hs_err_pid*
+
+# Node / React
+node_modules/
+dist/
+coverage/
+.turbo/
+
+# OS / tooling
+.cursor/
+*.orig
