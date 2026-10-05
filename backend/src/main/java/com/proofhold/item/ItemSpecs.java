@@ -24,6 +24,13 @@ public final class ItemSpecs {
             }
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
+            } else {
+                predicates.add(root.get("status").in(
+                        ItemStatus.HELD,
+                        ItemStatus.CLAIM_PENDING,
+                        ItemStatus.VERIFIED,
+                        ItemStatus.READY_FOR_PICKUP,
+                        ItemStatus.EXPIRED));
             }
             if (q != null && !q.isBlank()) {
                 String needle = q.trim().toLowerCase(Locale.ROOT);

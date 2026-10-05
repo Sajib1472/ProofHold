@@ -27,10 +27,15 @@ public class ItemController {
 
     private final ItemService items;
     private final com.proofhold.claim.ClaimService claims;
+    private final com.proofhold.handoff.HandoffService handoffs;
 
-    public ItemController(ItemService items, com.proofhold.claim.ClaimService claims) {
+    public ItemController(
+            ItemService items,
+            com.proofhold.claim.ClaimService claims,
+            com.proofhold.handoff.HandoffService handoffs) {
         this.items = items;
         this.claims = claims;
+        this.handoffs = handoffs;
     }
 
     @GetMapping
@@ -80,6 +85,22 @@ public class ItemController {
             builder.header(HttpHeaders.LOCATION, "/v1/claims/" + result.claim().id());
         }
         return builder.body(result.claim());
+    }
+
+    @PostMapping("/{itemId}/handoffs")
+    public ResponseEntity<com.proofhold.handoff.HandoffResponse> createHandoff(
+            @PathVariable Long itemId,
+            @RequestHeader("Idempotency-Key") UUID idempotencyKey,
+            @RequestHeader("If-Match") String ifMatch,
+            @Valid @RequestBody com.proofhold.handoff.CreateHandoffRequest request) {
+        var result = handoffs.create(AuthPrincipals.require(), itemId, idempotencyKey, ifMatch, request);
+        HttpStatus status = result.created() ? HttpStatus.CREATED : HttpStatus.OK;
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(status)
+                .header(HttpHeaders.ETAG, ETags.quote(result.itemVersion()));
+        if (result.created()) {
+            builder.header(HttpHeaders.LOCATION, "/v1/handoffs/" + result.handoff().id());
+        }
+        return builder.body(result.handoff());
     }
 
     private static int versionOf(Object body) {
