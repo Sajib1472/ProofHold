@@ -55,6 +55,10 @@ public class Item {
         return id;
     }
 
+    public void setId(Long id) {
+        this.id = id;
+    }
+
     public Location getLocation() {
         return location;
     }
@@ -105,5 +109,9 @@ public class Item {
 
     public Integer getVersion() {
         return version;
+    }
+
+    public void setVersion(Integer version) {
+        this.version = version;
     }
 }

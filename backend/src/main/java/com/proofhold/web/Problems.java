@@ -28,4 +28,16 @@ public final class Problems {
     public static Problem validation(String instance, String detail, java.util.List<Problem.FieldError> errors) {
         return new Problem(BASE + "validation", "Validation failed", 422, detail, instance, errors);
     }
+
+    public static Problem notFound(String instance, String detail) {
+        return Problem.of(BASE + "not-found", "Not found", 404, detail, instance);
+    }
+
+    public static Problem conflict(String slug, String title, String detail, String instance) {
+        return Problem.of(BASE + slug, title, 409, detail, instance);
+    }
+
+    public static Problem preconditionFailed(String instance, String detail) {
+        return Problem.of(BASE + "precondition-failed", "Precondition failed", 412, detail, instance);
+    }
 }

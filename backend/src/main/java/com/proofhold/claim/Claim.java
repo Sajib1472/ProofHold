@@ -56,6 +56,10 @@ public class Claim {
         return id;
     }
 
+    public void setId(Long id) {
+        this.id = id;
+    }
+
     public Item getItem() {
         return item;
     }
