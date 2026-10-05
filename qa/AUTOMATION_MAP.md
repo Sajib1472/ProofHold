@@ -12,3 +12,6 @@
 | TC-10 | Automated | `ClaimServiceSubmitTest.claimingReturnedItemIs409` |
 
 TC-07, TC-08 remain manual until a live API suite is added.
+
+UI happy path (not a P0 ID): `frontend/e2e/happy-path.spec.ts` — staff log → Alice claim → approve → book pickup. Requires API + Vite running.
+
