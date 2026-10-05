@@ -7,6 +7,7 @@ import com.proofhold.claim.ClaimRepository;
 import com.proofhold.domain.AnswerHasher;
 import com.proofhold.domain.AuditAction;
 import com.proofhold.domain.ClaimStatus;
+import com.proofhold.domain.ItemCategory;
 import com.proofhold.domain.ItemStateMachine;
 import com.proofhold.domain.ItemStatus;
 import com.proofhold.domain.Role;
@@ -17,6 +18,10 @@ import com.proofhold.user.UserRepository;
 import com.proofhold.web.NotFoundException;
 import com.proofhold.web.Problem;
 import com.proofhold.web.ValidationFailedException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -106,6 +111,25 @@ public class ItemService {
             return ItemViews.toVerifiedClaimer(item, secret(itemId), pending);
         }
         return ItemViews.toPublic(item, pending);
+    }
+
+    @Transactional(readOnly = true)
+    public PublicItemPage list(
+            Long locationId, ItemCategory category, ItemStatus status, String q, int page, int size) {
+        if (size < 1 || size > 100 || page < 0) {
+            throw new ValidationFailedException(
+                    "Request is not valid.",
+                    List.of(new Problem.FieldError("size", "range", "page must be >= 0 and size must be 1–100.")));
+        }
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Order.desc("foundAt"), Sort.Order.desc("id")));
+        Page<Item> result = items.findAll(ItemSpecs.filter(locationId, category, status, q), pageable);
+        List<PublicItemResponse> content = result.getContent().stream()
+                .map(item -> ItemViews.toPublic(
+                        item, (int) claims.countByItemIdAndStatus(item.getId(), ClaimStatus.PENDING)))
+                .toList();
+        return new PublicItemPage(
+                content,
+                new PageInfo(result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages()));
     }
 
     Item requireItem(Long itemId) {
