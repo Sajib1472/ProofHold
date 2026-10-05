@@ -1,0 +1,13 @@
+package com.proofhold.domain;
+
+public enum AuditAction {
+    ITEM_LOGGED,
+    CLAIM_SUBMITTED,
+    CLAIM_APPROVED,
+    CLAIM_REJECTED,
+    HANDOFF_BOOKED,
+    HANDOFF_COMPLETED,
+    ITEM_EXPIRED,
+    ITEM_DONATED,
+    ILLEGAL_TRANSITION
+}

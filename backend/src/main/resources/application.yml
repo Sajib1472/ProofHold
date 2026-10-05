@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: proofhold
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/proofhold}
+    username: ${POSTGRES_USER:proofhold}
+    password: ${POSTGRES_PASSWORD:proofhold}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+  jackson:
+    serialization:
+      WRITE_DATES_AS_TIMESTAMPS: false
+
+server:
+  port: ${PORT:8080}
+
+proofhold:
+  seed:
+    enabled: true
+    password: proofhold

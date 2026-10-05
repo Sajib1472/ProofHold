@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: proofhold
+      POSTGRES_USER: proofhold
+      POSTGRES_PASSWORD: proofhold
+    ports:
+      - "5432:5432"
+    volumes:
+      - proofhold_pg:/var/lib/postgresql/data
+
+volumes:
+  proofhold_pg:
