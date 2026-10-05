@@ -1,0 +1,1 @@
+ALTER TABLE claims ADD COLUMN request_hash VARCHAR(64) NOT NULL DEFAULT '';

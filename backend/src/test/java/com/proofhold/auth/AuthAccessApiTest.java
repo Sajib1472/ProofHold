@@ -1,6 +1,7 @@
 package com.proofhold.auth;
 
 import com.proofhold.claim.ClaimController;
+import com.proofhold.claim.ClaimService;
 import com.proofhold.config.SecurityConfig;
 import com.proofhold.domain.Role;
 import com.proofhold.item.ItemController;
@@ -47,6 +48,9 @@ class AuthAccessApiTest {
 
     @MockBean
     ItemService itemService;
+
+    @MockBean
+    ClaimService claimService;
 
     @Test
     void createItemWithoutTokenIs401() throws Exception {

@@ -41,6 +41,9 @@ public class Claim {
     @Column(name = "idempotency_key", nullable = false)
     private UUID idempotencyKey;
 
+    @Column(name = "request_hash", nullable = false)
+    private String requestHash;
+
     private String reason;
 
     @Column(name = "answer_score")
@@ -90,6 +93,14 @@ public class Claim {
 
     public void setIdempotencyKey(UUID idempotencyKey) {
         this.idempotencyKey = idempotencyKey;
+    }
+
+    public String getRequestHash() {
+        return requestHash;
+    }
+
+    public void setRequestHash(String requestHash) {
+        this.requestHash = requestHash;
     }
 
     public String getReason() {

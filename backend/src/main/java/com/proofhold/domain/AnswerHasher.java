@@ -18,9 +18,13 @@ public final class AnswerHasher {
     }
 
     public static String hash(String raw) {
+        return sha256(normalize(raw));
+    }
+
+    public static String sha256(String value) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(normalize(raw).getBytes(StandardCharsets.UTF_8));
+            byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(bytes);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 not available", e);

@@ -13,18 +13,24 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/v1/items")
 public class ItemController {
 
     private final ItemService items;
+    private final com.proofhold.claim.ClaimService claims;
 
-    public ItemController(ItemService items) {
+    public ItemController(ItemService items, com.proofhold.claim.ClaimService claims) {
         this.items = items;
+        this.claims = claims;
     }
 
     @GetMapping
@@ -53,6 +59,27 @@ public class ItemController {
         Object body = items.get(itemId, AuthPrincipals.optional());
         int version = versionOf(body);
         return ResponseEntity.ok().header(HttpHeaders.ETAG, ETags.quote(version)).body(body);
+    }
+
+    @GetMapping("/{itemId}/challenges")
+    @PreAuthorize("hasRole('CLAIMER')")
+    public List<ChallengePrompt> challenges(@PathVariable Long itemId) {
+        return claims.prompts(itemId);
+    }
+
+    @PostMapping("/{itemId}/claims")
+    @PreAuthorize("hasRole('CLAIMER')")
+    public ResponseEntity<com.proofhold.claim.ClaimResponse> submitClaim(
+            @PathVariable Long itemId,
+            @RequestHeader("Idempotency-Key") UUID idempotencyKey,
+            @Valid @RequestBody com.proofhold.claim.CreateClaimRequest request) {
+        var result = claims.submit(AuthPrincipals.require(), itemId, idempotencyKey, request);
+        HttpStatus status = result.created() ? HttpStatus.CREATED : HttpStatus.OK;
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(status);
+        if (result.created()) {
+            builder.header(HttpHeaders.LOCATION, "/v1/claims/" + result.claim().id());
+        }
+        return builder.body(result.claim());
     }
 
     private static int versionOf(Object body) {
