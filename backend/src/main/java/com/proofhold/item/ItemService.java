@@ -15,7 +15,10 @@ import com.proofhold.location.Location;
 import com.proofhold.location.LocationRepository;
 import com.proofhold.user.User;
 import com.proofhold.user.UserRepository;
+import com.proofhold.web.ConflictException;
+import com.proofhold.web.ETags;
 import com.proofhold.web.NotFoundException;
+import com.proofhold.web.PreconditionFailedException;
 import com.proofhold.web.Problem;
 import com.proofhold.web.ValidationFailedException;
 import org.springframework.data.domain.Page;
@@ -143,5 +146,44 @@ public class ItemService {
 
     private boolean isWinningClaimer(Long itemId, Long claimerId) {
         return claims.findByItemIdAndClaimer_IdAndStatus(itemId, claimerId, ClaimStatus.VERIFIED).isPresent();
+    }
+
+    @Transactional
+    public int expireDue(Instant now) {
+        User actor = users.findByEmail("staff@proofhold.local").orElse(null);
+        List<Item> due = items.findByStatusInAndHoldUntilBefore(
+                List.of(ItemStatus.HELD, ItemStatus.CLAIM_PENDING), now);
+        int count = 0;
+        for (Item item : due) {
+            item.setStatus(ItemStateMachine.require(item.getStatus(), ItemStatus.EXPIRED));
+            items.save(item);
+            if (actor != null) {
+                audit.record(item, actor, AuditAction.ITEM_EXPIRED, Map.of());
+            }
+            count++;
+        }
+        return count;
+    }
+
+    @Transactional
+    public StaffItemResponse donate(AuthPrincipal principal, Long itemId, String ifMatch) {
+        User staff = users.findById(principal.id()).orElseThrow(UnauthorizedException::new);
+        Item item = requireItem(itemId);
+        int expected = ETags.parse(ifMatch);
+        int current = item.getVersion() == null ? 0 : item.getVersion();
+        if (expected != current) {
+            throw new PreconditionFailedException("Item version does not match If-Match.");
+        }
+        if (item.getStatus() != ItemStatus.EXPIRED) {
+            throw new ConflictException(
+                    "illegal-transition",
+                    "Illegal transition",
+                    "Only EXPIRED items can be donated.");
+        }
+        item.setStatus(ItemStateMachine.require(ItemStatus.EXPIRED, ItemStatus.DONATED));
+        items.save(item);
+        audit.record(item, staff, AuditAction.ITEM_DONATED, Map.of());
+        int pending = (int) claims.countByItemIdAndStatus(itemId, ClaimStatus.PENDING);
+        return ItemViews.toStaff(item, secret(itemId), challenges.findByItemId(itemId), pending);
     }
 }

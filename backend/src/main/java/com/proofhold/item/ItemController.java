@@ -103,6 +103,16 @@ public class ItemController {
         return builder.body(result.handoff());
     }
 
+    @PostMapping("/{itemId}/donate")
+    @PreAuthorize("hasRole('STAFF')")
+    public ResponseEntity<StaffItemResponse> donate(
+            @PathVariable Long itemId, @RequestHeader("If-Match") String ifMatch) {
+        StaffItemResponse body = items.donate(AuthPrincipals.require(), itemId, ifMatch);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.ETAG, ETags.quote(body.version()))
+                .body(body);
+    }
+
     private static int versionOf(Object body) {
         if (body instanceof PublicItemResponse publicItem) {
             return publicItem.version();
