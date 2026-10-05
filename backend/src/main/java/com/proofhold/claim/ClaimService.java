@@ -209,4 +209,15 @@ public class ClaimService {
         }
         return matches;
     }
+
+    @Transactional(readOnly = true)
+    public ClaimListPage listMine(AuthPrincipal principal, int page, int size) {
+        var pageable = org.springframework.data.domain.PageRequest.of(
+                page, size, org.springframework.data.domain.Sort.by("createdAt").descending());
+        var result = claims.findByClaimer_Id(principal.id(), pageable);
+        return new ClaimListPage(
+                result.getContent().stream().map(ClaimResponse::forClaimer).toList(),
+                new com.proofhold.item.PageInfo(
+                        result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages()));
+    }
 }

@@ -18,4 +18,6 @@ public interface ClaimRepository extends JpaRepository<Claim, Long> {
     long countByItemIdAndStatus(Long itemId, ClaimStatus status);
 
     Optional<Claim> findByItemIdAndClaimer_IdAndStatus(Long itemId, Long claimerId, ClaimStatus status);
+
+    org.springframework.data.domain.Page<Claim> findByClaimer_Id(Long claimerId, org.springframework.data.domain.Pageable pageable);
 }
