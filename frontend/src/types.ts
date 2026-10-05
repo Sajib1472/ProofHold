@@ -101,3 +101,55 @@ export class ApiError extends Error {
     super(problem.detail);
   }
 }
+
+export interface LocationDesk {
+  id: number;
+  name: string;
+  timezone: string;
+  openFrom: string;
+  openTo: string;
+}
+
+export interface StaffChallenge {
+  id: number;
+  prompt: string;
+}
+
+export interface StaffItem extends PublicItem {
+  holdUntil?: string;
+  whereFound?: string;
+  photoUrl?: string | null;
+  serial?: string | null;
+  uniqueMarks?: string | null;
+  fullDescription?: string | null;
+  challenges?: StaffChallenge[];
+}
+
+export interface StaffClaimView {
+  claim: Claim;
+  answers: { challengeId: number; prompt: string; value: string }[];
+}
+
+export interface AuditEvent {
+  id: number;
+  itemId: number;
+  actorId: number;
+  action: string;
+  at: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface AuditPage {
+  content: AuditEvent[];
+  page: PageInfo;
+}
+
+export interface Handoff {
+  id: number;
+  itemId: number;
+  claimId: number;
+  slotStart: string;
+  slotEnd: string;
+  status: string;
+}
+

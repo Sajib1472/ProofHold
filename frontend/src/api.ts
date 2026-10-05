@@ -1,4 +1,4 @@
-import { ApiError, type Claim, type ClaimPage, type ChallengePrompt, type Problem, type PublicItem, type PublicItemPage, type TokenResponse, type User } from "./types";
+import { ApiError, type AuditPage, type Claim, type ClaimPage, type ChallengePrompt, type Handoff, type LocationDesk, type Problem, type PublicItem, type PublicItemPage, type StaffClaimView, type StaffItem, type TokenResponse, type User } from "./types";
 
 const TOKEN_KEY = "proofhold.token";
 
@@ -70,5 +70,54 @@ export const api = {
   },
   myClaims() {
     return request<ClaimPage>("/v1/me/claims");
+  },
+  locations() {
+    return request<LocationDesk[]>("/v1/locations");
+  },
+  async getStaffItem(id: number) {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(`/v1/items/${id}`, { headers });
+    const data = (await response.json()) as StaffItem | Problem;
+    if (!response.ok) {
+      throw new ApiError(data as Problem, response.status);
+    }
+    return { item: data as StaffItem, etag: response.headers.get("ETag") };
+  },
+  createItem(body: unknown) {
+    return request<StaffItem>("/v1/items", { method: "POST", body: JSON.stringify(body) });
+  },
+  itemClaims(itemId: number) {
+    return request<StaffClaimView[]>(`/v1/items/${itemId}/claims`);
+  },
+  decide(claimId: number, etag: string, decision: "APPROVE" | "REJECT", reason: string) {
+    return request<{ claim: Claim; itemVersion: number }>(`/v1/claims/${claimId}/decision`, {
+      method: "POST",
+      headers: { "If-Match": etag },
+      body: JSON.stringify({ decision, reason })
+    });
+  },
+  createHandoff(itemId: number, etag: string, slotStart: string, slotEnd: string) {
+    return request<Handoff>(`/v1/items/${itemId}/handoffs`, {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID(), "If-Match": etag },
+      body: JSON.stringify({ slotStart, slotEnd })
+    });
+  },
+  completeHandoff(handoffId: number, etag: string) {
+    return request<Handoff>(`/v1/handoffs/${handoffId}/complete`, {
+      method: "POST",
+      headers: { "If-Match": etag }
+    });
+  },
+  donate(itemId: number, etag: string) {
+    return request<StaffItem>(`/v1/items/${itemId}/donate`, {
+      method: "POST",
+      headers: { "If-Match": etag }
+    });
+  },
+  audit(itemId: number) {
+    return request<AuditPage>(`/v1/items/${itemId}/audit`);
   }
 };

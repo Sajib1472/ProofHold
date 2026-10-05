@@ -55,6 +55,9 @@ class AuthAccessApiTest {
     @MockBean
     com.proofhold.handoff.HandoffService handoffService;
 
+    @MockBean
+    com.proofhold.audit.AuditService auditService;
+
     @Test
     void createItemWithoutTokenIs401() throws Exception {
         mvc.perform(post("/v1/items"))

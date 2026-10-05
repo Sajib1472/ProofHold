@@ -38,3 +38,21 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   }
   return children;
 }
+
+export function RequireStaff({ children }: { children: React.ReactNode }) {
+  const { user, ready } = useAuth();
+  if (!ready) {
+    return <main>Loading session…</main>;
+  }
+  if (!user) {
+    return <Navigate to="/login" replace state={{ expired: true }} />;
+  }
+  if (user.role !== "STAFF") {
+    return (
+      <main>
+        <div className="banner error">Staff only. The API also returns 403 for these routes.</div>
+      </main>
+    );
+  }
+  return children;
+}

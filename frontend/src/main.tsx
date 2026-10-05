@@ -2,12 +2,15 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth";
-import { AppLayout, RequireAuth } from "./AppLayout";
+import { AppLayout, RequireAuth, RequireStaff } from "./AppLayout";
 import { LoginPage } from "./pages/LoginPage";
 import { SearchPage } from "./pages/SearchPage";
 import { ItemPage } from "./pages/ItemPage";
 import { ClaimWizardPage } from "./pages/ClaimWizardPage";
 import { MyClaimsPage } from "./pages/MyClaimsPage";
+import { StaffQueuePage } from "./pages/StaffQueuePage";
+import { StaffLogItemPage } from "./pages/StaffLogItemPage";
+import { StaffItemPage } from "./pages/StaffItemPage";
 import "./index.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -33,6 +36,30 @@ createRoot(document.getElementById("root")!).render(
                 <RequireAuth>
                   <MyClaimsPage />
                 </RequireAuth>
+              }
+            />
+            <Route
+              path="/staff"
+              element={
+                <RequireStaff>
+                  <StaffQueuePage />
+                </RequireStaff>
+              }
+            />
+            <Route
+              path="/staff/log"
+              element={
+                <RequireStaff>
+                  <StaffLogItemPage />
+                </RequireStaff>
+              }
+            />
+            <Route
+              path="/staff/items/:itemId"
+              element={
+                <RequireStaff>
+                  <StaffItemPage />
+                </RequireStaff>
               }
             />
             <Route path="/" element={<SearchPage />} />

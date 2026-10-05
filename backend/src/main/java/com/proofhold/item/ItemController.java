@@ -28,14 +28,17 @@ public class ItemController {
     private final ItemService items;
     private final com.proofhold.claim.ClaimService claims;
     private final com.proofhold.handoff.HandoffService handoffs;
+    private final com.proofhold.audit.AuditService audit;
 
     public ItemController(
             ItemService items,
             com.proofhold.claim.ClaimService claims,
-            com.proofhold.handoff.HandoffService handoffs) {
+            com.proofhold.handoff.HandoffService handoffs,
+            com.proofhold.audit.AuditService audit) {
         this.items = items;
         this.claims = claims;
         this.handoffs = handoffs;
+        this.audit = audit;
     }
 
     @GetMapping
@@ -111,6 +114,21 @@ public class ItemController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.ETAG, ETags.quote(body.version()))
                 .body(body);
+    }
+
+    @GetMapping("/{itemId}/claims")
+    @PreAuthorize("hasRole('STAFF')")
+    public List<com.proofhold.claim.StaffClaimView> itemClaims(@PathVariable Long itemId) {
+        return claims.listForItem(itemId);
+    }
+
+    @GetMapping("/{itemId}/audit")
+    @PreAuthorize("hasRole('STAFF')")
+    public com.proofhold.audit.AuditPage audit(
+            @PathVariable Long itemId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return audit.list(itemId, page, size);
     }
 
     private static int versionOf(Object body) {

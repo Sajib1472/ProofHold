@@ -50,6 +50,8 @@ class ClaimServiceSubmitTest {
     UserRepository users;
     @Mock
     AuditService audit;
+    @Mock
+    ClaimAnswerRepository answers;
 
     @InjectMocks
     ClaimService service;

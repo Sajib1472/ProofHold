@@ -28,4 +28,14 @@ public class AuditService {
         event.setPayload(payload);
         events.save(event);
     }
+
+    @Transactional(readOnly = true)
+    public AuditPage list(Long itemId, int page, int size) {
+        var pageable = org.springframework.data.domain.PageRequest.of(page, size);
+        var result = events.findByItemIdOrderByAtAsc(itemId, pageable);
+        return new AuditPage(
+                result.getContent().stream().map(AuditEventResponse::from).toList(),
+                new com.proofhold.item.PageInfo(
+                        result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages()));
+    }
 }

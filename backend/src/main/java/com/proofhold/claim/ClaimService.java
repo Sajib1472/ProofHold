@@ -38,18 +38,21 @@ public class ClaimService {
     private final ChallengeRepository challenges;
     private final UserRepository users;
     private final AuditService audit;
+    private final ClaimAnswerRepository answers;
 
     public ClaimService(
             ClaimRepository claims,
             ItemRepository items,
             ChallengeRepository challenges,
             UserRepository users,
-            AuditService audit) {
+            AuditService audit,
+            ClaimAnswerRepository answers) {
         this.claims = claims;
         this.items = items;
         this.challenges = challenges;
         this.users = users;
         this.audit = audit;
+        this.answers = answers;
     }
 
     @Transactional(readOnly = true)
@@ -97,6 +100,13 @@ public class ClaimService {
         claim.setAnswerScore(score);
         claim.setCreatedAt(Instant.now());
         claim = claims.save(claim);
+        for (CreateClaimRequest.ClaimAnswer row : request.answers()) {
+            ClaimAnswer stored = new ClaimAnswer();
+            stored.setClaimId(claim.getId());
+            stored.setChallengeId(row.challengeId());
+            stored.setValue(row.value());
+            answers.save(stored);
+        }
 
         if (item.getStatus() == ItemStatus.HELD) {
             item.setStatus(ItemStateMachine.require(ItemStatus.HELD, ItemStatus.CLAIM_PENDING));
@@ -219,5 +229,19 @@ public class ClaimService {
                 result.getContent().stream().map(ClaimResponse::forClaimer).toList(),
                 new com.proofhold.item.PageInfo(
                         result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages()));
+    }
+
+    @Transactional(readOnly = true)
+    public List<StaffClaimView> listForItem(Long itemId) {
+        requireItem(itemId);
+        List<Challenge> itemChallenges = challenges.findByItemId(itemId);
+        Map<Long, String> prompts = itemChallenges.stream().collect(Collectors.toMap(Challenge::getId, Challenge::getPrompt));
+        return claims.findByItemId(itemId).stream()
+                .map(claim -> new StaffClaimView(
+                        ClaimResponse.forStaff(claim),
+                        answers.findByClaimId(claim.getId()).stream()
+                                .map(a -> new StaffClaimView.Answer(a.getChallengeId(), prompts.get(a.getChallengeId()), a.getValue()))
+                                .toList()))
+                .toList();
     }
 }
