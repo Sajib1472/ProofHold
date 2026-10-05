@@ -9,7 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,15 +21,17 @@ public class DemoSeed implements ApplicationRunner {
 
     private final LocationRepository locations;
     private final UserRepository users;
+    private final PasswordEncoder passwords;
     private final String seedPassword;
-    private final BCryptPasswordEncoder passwords = new BCryptPasswordEncoder();
 
     public DemoSeed(
             LocationRepository locations,
             UserRepository users,
+            PasswordEncoder passwords,
             @Value("${proofhold.seed.password:proofhold}") String seedPassword) {
         this.locations = locations;
         this.users = users;
+        this.passwords = passwords;
         this.seedPassword = seedPassword;
     }
 
@@ -44,7 +46,7 @@ public class DemoSeed implements ApplicationRunner {
             desk.setOpenTo(LocalTime.of(17, 0));
             locations.save(desk);
         }
-        seedUser("staff@proofhold.local", Role.STAFF);
+        seedUser("staff@proofhold.local".toLowerCase(), Role.STAFF);
         seedUser("alice@proofhold.local", Role.CLAIMER);
         seedUser("bob@proofhold.local", Role.CLAIMER);
     }

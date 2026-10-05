@@ -26,3 +26,7 @@ proofhold:
   seed:
     enabled: true
     password: proofhold
+  jwt:
+    secret: ${PROOFHOLD_JWT_SECRET:proofhold-dev-secret-change-me-32b}
+    issuer: proofhold
+    access-seconds: 3600
