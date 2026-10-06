@@ -27,3 +27,5 @@ coverage/
 # OS / tooling
 .cursor/
 *.orig
+
+docs/INTERVIEW.md
