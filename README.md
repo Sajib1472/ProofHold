@@ -78,23 +78,23 @@ cd frontend && npx playwright test
 
 ```mermaid
 sequenceDiagram
-  actor Alice as Alice (CLAIMER)
+  actor Alice as Claimer
   actor Staff as Staff
-  participant API as ProofHold /v1
-  Staff->>API: POST /items (wallet + challenges)
-  API-->>Staff: 201 StaffItem (HELD) + ETag
-  Alice->>API: GET /items (PublicItem page)
-  Alice->>API: GET /items/{id}/challenges
-  Alice->>API: POST /items/{id}/claims + Idempotency-Key
-  API-->>Alice: 201 Claim PENDING
-  Note over API: item HELD → CLAIM_PENDING
-  Staff->>API: POST /claims/{id}/decision APPROVE + If-Match
-  Note over API: Alice VERIFIED; other pending REJECTED
-  Alice->>API: POST /items/{id}/handoffs (desk hours)
-  API-->>Alice: 201 Handoff BOOKED
-  Note over API: item → READY_FOR_PICKUP
-  Staff->>API: POST /handoffs/{id}/complete + If-Match
-  Note over API: item → RETURNED
+  participant API as ProofHold v1
+  Staff->>API: POST /items
+  API-->>Staff: 201 HELD plus ETag
+  Alice->>API: GET /items redacted list
+  Alice->>API: GET challenges
+  Alice->>API: POST claims with Idempotency-Key
+  API-->>Alice: 201 PENDING
+  Note over API: HELD to CLAIM_PENDING
+  Staff->>API: POST decision APPROVE with If-Match
+  Note over API: Alice wins, other claims rejected
+  Alice->>API: POST handoffs in desk hours
+  API-->>Alice: 201 BOOKED
+  Note over API: READY_FOR_PICKUP
+  Staff->>API: POST handoff complete with If-Match
+  Note over API: RETURNED
 ```
 
 Redaction uses **separate DTOs** (`PublicItem` vs `StaffItem`), not a shared entity with fields set to null. Optimistic locking: item `version` as `ETag` / `If-Match`. Decisions are `POST /v1/claims/{id}/decision`, not `/approveClaim`.
